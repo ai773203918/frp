@@ -3,9 +3,9 @@ name: 构建 Docker 镜像
 
 # 触发条件
 on:
-  # 每小时运行一次检查
+  # 每周一北京时间上午 10 点左右运行一次检查 (UTC 时间凌晨 2 点)
   schedule:
-    - cron: '0 * * * *'
+    - cron: '0 2 * * 1'
   # 允许手动触发
   workflow_dispatch:
 
@@ -58,66 +58,55 @@ jobs:
 
   # 任务 2: 构建并推送镜像
   build-and-push:
-    # 依赖于 check-and-build 任务的完成
     needs: check-and-build
-    # 【删除】这里的 if 条件，因为它不可靠
-    # if: needs.check-and-build.outputs.should_build == 'true' 
-    runs-on: ubuntu-latest # 运行环境
+    runs-on: ubuntu-latest
 
-    # 任务步骤
     steps:
-      # 【新增】第一步，检查是否应该继续构建
-      # 如果不应该构建，则提前退出这个 job
-      - name: 检查是否需要构建
-        if: needs.check-and-build.outputs.should_build != 'true'
-        run: |
-          echo "镜像已存在，无需构建。"
-          # 提前退出，标记为成功（绿色），但后续步骤不会执行
-          exit 0
-
-      # 步骤 1: 检出上游仓库的源代码
-      - name: 检出 fatedier/frp 源代码
+      # 步骤 1: 检出【你自己的】仓库代码，以获取 Dockerfile
+      - name: Checkout my repository
         uses: actions/checkout@v4
-        with:
-          # 指定要检出的仓库是上游仓库
-          repository: fatedier/frp
-          # 检出特定的 release tag（由上一个 job 传递而来）
-          ref: ${{ needs.check-and-build.outputs.latest_tag }}
 
-      # 步骤 2: 设置 Docker Buildx
-      - name: 设置 Docker Buildx
+      # 步骤 2: 下载上游 Release 的源码
+      - name: Download upstream source code
+        run: |
+          # 获取版本号
+          TAG="${{ needs.check-and-build.outputs.latest_tag }}"
+          # 构造下载链接
+          DOWNLOAD_URL="https://github.com/fatedier/frp/releases/download/${TAG}/frp_${TAG#v}_linux_amd64.tar.gz"
+          echo "Downloading source from $DOWNLOAD_URL"
+          # 创建目录并下载
+          mkdir -p frp-src
+          wget -qO- "$DOWNLOAD_URL" | tar -xz -C frp-src --strip-components=1
+
+      # 步骤 3: 设置 Docker Buildx
+      - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      # 步骤 3: 登录到 Docker Hub
-      - name: 登录到 Docker Hub
+      # 步骤 4: 登录到 Docker Hub
+      - name: Log in to Docker Hub
         uses: docker/login-action@v3
         with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }} # 从 Secrets 中读取用户名
-          password: ${{ secrets.DOCKERHUB_TOKEN }}   # 从 Secrets 中读取访问令牌
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      # 步骤 4: 提取元数据（标签和标签）
-      - name: 提取元数据
+      # 步骤 5: 提取元数据（标签和标签）
+      - name: Extract metadata
         id: meta
         uses: docker/metadata-action@v5
         with:
-          # 镜像名称现在是统一的 frp
           images: ${{ secrets.DOCKERHUB_USERNAME }}/frp
-          # 定义镜像的标签
           tags: |
-            # 标签为最新的 release tag (例如 v0.65.0)
             type=raw,value=${{ needs.check-and-build.outputs.latest_tag }}
-            # 添加一个 'latest' 标签
             type=raw,value=latest
 
-      # 步骤 5: 构建并推送 Docker 镜像
-      - name: 构建并推送 Docker 镜像
+      # 步骤 6: 构建并推送 Docker 镜像
+      - name: Build and push Docker image
         uses: docker/build-push-action@v5
         with:
-          context: . # 构建上下文是当前目录
+          context: . # 构建上下文是当前目录（包含 Dockerfile 和 frp-src）
           file: ./Dockerfile # 指定 Dockerfile 路径
-          push: true # 推送镜像到仓库
-          tags: ${{ steps.meta.outputs.tags }} # 使用上一步生成的标签
-          labels: ${{ steps.meta.outputs.labels }} # 使用上一步生成的标签
-          # 启用构建缓存，加速后续构建
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
