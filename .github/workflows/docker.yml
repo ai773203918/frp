@@ -44,7 +44,7 @@ jobs:
           # 使用 skopeo 工具进行检查，需要先安装
           sudo apt-get update
           sudo apt-get install -y skopeo
-          
+
           # 【关键修改】检查触发事件
           # 如果是手动触发，则直接设置 should_build=true，跳过检查
           if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
@@ -64,9 +64,8 @@ jobs:
 
   # 任务 2: 构建并推送镜像
   build-and-push:
+    # 【修改】删除这里的 if 条件，因为它不可靠
     needs: check-and-build
-    # 只有当 should_build 为 true 时才运行
-    if: needs.check-and-build.outputs.should_build == 'true'
     runs-on: ubuntu-latest
     # 权限设置，允许写入 GitHub Packages
     permissions:
@@ -74,6 +73,15 @@ jobs:
       packages: write
 
     steps:
+      # 【新增】第一步，检查是否应该继续构建
+      # 如果不应该构建，则提前退出这个 job
+      - name: 检查是否需要构建
+        if: needs.check-and-build.outputs.should_build != 'true'
+        run: |
+          echo "镜像已存在或无需构建。"
+          # 提前退出，标记为成功（绿色），但后续步骤不会执行
+          exit 0
+
       # 步骤 1: 检出【你自己的】仓库代码，以获取 Dockerfile
       - name: 检出我的仓库代码
         uses: actions/checkout@v4
