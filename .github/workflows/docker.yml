@@ -66,16 +66,17 @@ jobs:
       - name: Checkout my repository
         uses: actions/checkout@v4
 
-      # 步骤 2: 下载上游 Release 的源码
+      # 步骤 2: 下载上游 Release 的【源码】
       - name: Download upstream source code
         run: |
           # 获取版本号
           TAG="${{ needs.check-and-build.outputs.latest_tag }}"
-          # 构造下载链接
-          DOWNLOAD_URL="https://github.com/fatedier/frp/releases/download/${TAG}/frp_${TAG#v}_linux_amd64.tar.gz"
+          # 【修改】构造正确的源码 tar.gz 下载链接
+          DOWNLOAD_URL="https://github.com/fatedier/frp/archive/refs/tags/${TAG}.tar.gz"
           echo "Downloading source from $DOWNLOAD_URL"
-          # 创建目录并下载
+          # 创建目录并下载解压
           mkdir -p frp-src
+          # --strip-components=1 会自动去掉顶层目录（如 frp-0.65.0/）
           wget -qO- "$DOWNLOAD_URL" | tar -xz -C frp-src --strip-components=1
 
       # 步骤 3: 设置 Docker Buildx
