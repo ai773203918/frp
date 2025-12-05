@@ -1,10 +1,10 @@
-# 第一阶段：构建阶段
-FROM golang:1.23 AS building
+# 【修改】将 Go 版本从 1.23 升级到 1.24
+FROM golang:1.24 AS building
 
 # 设置工作目录
 WORKDIR /building
 
-# 【修改】从 frp-src 子目录复制源码，而不是当前目录
+# 从 frp-src 子目录复制源码
 COPY frp-src/ .
 
 # 在/building目录下执行make命令，构建frps和frpc二进制文件
