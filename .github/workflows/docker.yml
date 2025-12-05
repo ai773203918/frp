@@ -126,7 +126,7 @@ jobs:
           # 指定要推送到的所有镜像仓库
           images: |
             ${{ secrets.DOCKERHUB_USERNAME }}/frp
-            ghcr.io/${{ github.repository }}/frp
+            ghcr.io/${{ github.repository }}
           tags: |
             type=raw,value=${{ needs.check-and-build.outputs.latest_tag }}
             type=raw,value=latest
