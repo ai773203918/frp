@@ -45,63 +45,78 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y skopeo
           
-          # 【修改】现在只需要检查一个名为 frp 的镜像
+          # 检查 Docker Hub 上的镜像
           if skopeo inspect docker://docker.io/${{ secrets.DOCKERHUB_USERNAME }}/frp:$TAG > /dev/null 2>&1; then
-            echo "Tag 为 $TAG 的 frp 镜像已存在。跳过构建。"
-            # 设置输出变量，告知后续任务无需构建
+            echo "Docker Hub 上 Tag 为 $TAG 的 frp 镜像已存在。跳过构建。"
             echo "should_build=false" >> $GITHUB_OUTPUT
           else
-            echo "Tag 为 $TAG 的 frp 镜像不存在。将触发构建。"
-            # 设置输出变量，告知后续任务需要构建
+            echo "Docker Hub 上 Tag 为 $TAG 的 frp 镜像不存在。将触发构建。"
             echo "should_build=true" >> $GITHUB_OUTPUT
           fi
 
   # 任务 2: 构建并推送镜像
   build-and-push:
     needs: check-and-build
+    # 只有当 should_build 为 true 时才运行
+    if: needs.check-and-build.outputs.should_build == 'true'
     runs-on: ubuntu-latest
+    # 【新增】权限设置，允许写入 GitHub Packages
+    permissions:
+      contents: read
+      packages: write
 
     steps:
       # 步骤 1: 检出【你自己的】仓库代码，以获取 Dockerfile
-      - name: Checkout my repository
+      - name: 检出我的仓库代码
         uses: actions/checkout@v4
 
       # 步骤 2: 下载上游 Release 的【源码】
-      - name: Download upstream source code
+      - name: 下载上游源码
         run: |
           # 获取版本号
           TAG="${{ needs.check-and-build.outputs.latest_tag }}"
-          # 【修改】构造正确的源码 tar.gz 下载链接
+          # 构造正确的源码 tar.gz 下载链接
           DOWNLOAD_URL="https://github.com/fatedier/frp/archive/refs/tags/${TAG}.tar.gz"
-          echo "Downloading source from $DOWNLOAD_URL"
+          echo "正在从 $DOWNLOAD_URL 下载源码"
           # 创建目录并下载解压
           mkdir -p frp-src
           # --strip-components=1 会自动去掉顶层目录（如 frp-0.65.0/）
           wget -qO- "$DOWNLOAD_URL" | tar -xz -C frp-src --strip-components=1
 
       # 步骤 3: 设置 Docker Buildx
-      - name: Set up Docker Buildx
+      - name: 设置 Docker Buildx
         uses: docker/setup-buildx-action@v3
 
       # 步骤 4: 登录到 Docker Hub
-      - name: Log in to Docker Hub
+      - name: 登录到 Docker Hub
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      # 步骤 5: 提取元数据（标签和标签）
-      - name: Extract metadata
+      # 【新增】步骤 5: 登录到 GitHub Container Registry
+      - name: 登录到 GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # 步骤 6: 提取元数据（标签和标签）
+      - name: 提取元数据
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ secrets.DOCKERHUB_USERNAME }}/frp
+          # 【修改】指定要推送到的所有镜像仓库
+          images: |
+            ${{ secrets.DOCKERHUB_USERNAME }}/frp
+            ghcr.io/${{ github.repository }}/frp
           tags: |
             type=raw,value=${{ needs.check-and-build.outputs.latest_tag }}
             type=raw,value=latest
 
-      # 步骤 6: 构建并推送 Docker 镜像
-      - name: Build and push Docker image
+      # 步骤 7: 构建并推送 Docker 镜像
+      - name: 构建并推送 Docker 镜像
         uses: docker/build-push-action@v5
         with:
           context: . # 构建上下文是当前目录（包含 Dockerfile 和 frp-src）
@@ -109,5 +124,7 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          # 【新增】指定要构建的平台，实现多架构构建
+          platforms: linux/amd64, linux/arm64, linux/arm/v7
           cache-from: type=gha
           cache-to: type=gha,mode=max
