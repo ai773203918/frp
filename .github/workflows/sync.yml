@@ -46,12 +46,12 @@ jobs:
       - name: 从上游仓库获取
         run: git fetch upstream
 
-      # 步骤 5: 将上游的 main 分支合并到本地的 main 分支
-      - name: 将 upstream/main 合并到本地 main 分支
+      # 步骤 5: 将上游的 dev 分支合并到本地的 dev 分支
+      - name: 将 upstream/dev 合并到本地 dev 分支
         run: |
-          # 切换到 main 分支
-          git checkout main
-          # 合并上游仓库的 main 分支，并自动接受合并信息（不打开编辑器）
-          git merge upstream/main --no-edit
-          # 将合并后的代码推送到自己仓库的 main 分支
-          git push origin main
+          # 切换到 dev 分支
+          git checkout dev
+          # 合并上游仓库的 dev 分支，并自动接受合并信息（不打开编辑器）
+          git merge upstream/dev --no-edit
+          # 将合并后的代码推送到自己仓库的 dev 分支
+          git push origin dev
