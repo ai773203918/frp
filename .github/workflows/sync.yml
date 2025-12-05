@@ -1,0 +1,57 @@
+# 工作流名称
+name: 同步上游仓库
+
+# 触发条件
+on:
+  # 每天北京时间上午 9 点运行一次 (对应 UTC 时间凌晨 1 点)
+  schedule:
+    - cron: '0 1 * * *'
+  # 允许在 GitHub Actions 页面上手动触发
+  workflow_dispatch:
+
+# 设置 GITHUB_TOKEN 的权限，允许写入代码
+permissions:
+  contents: write
+
+# 任务定义
+jobs:
+  sync: # 任务 ID
+    runs-on: ubuntu-latest # 运行环境：最新版的 Ubuntu
+    # 条件判断：确保只在原始仓库所有者（ai773203918）的仓库中运行，避免在 Fork 者的仓库中运行
+    if: ${{ github.repository_owner == 'ai773203918' }}
+
+    # 任务步骤
+    steps:
+      # 步骤 1: 检出仓库代码
+      - name: 检出仓库代码
+        uses: actions/checkout@v4 # 使用官方的 checkout action v4
+        with:
+          # 使用 Personal Access Token (PAT)，这样推送后可以触发其他工作流
+          # 使用默认的 GITHUB_TOKEN 推送不会触发新的工作流
+          token: ${{ secrets.PAT }}
+          # 获取完整的提交历史记录，以便进行合并操作
+          fetch-depth: 0
+
+      # 步骤 2: 配置 Git 用户信息
+      - name: 配置 Git
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+      # 步骤 3: 添加上游仓库为远程源
+      - name: 添加上游远程源
+        run: git remote add upstream https://github.com/fatedier/frp.git
+
+      # 步骤 4: 从上游仓库获取最新代码
+      - name: 从上游仓库获取
+        run: git fetch upstream
+
+      # 步骤 5: 将上游的 main 分支合并到本地的 main 分支
+      - name: 将 upstream/main 合并到本地 main 分支
+        run: |
+          # 切换到 main 分支
+          git checkout main
+          # 合并上游仓库的 main 分支，并自动接受合并信息（不打开编辑器）
+          git merge upstream/main --no-edit
+          # 将合并后的代码推送到自己仓库的 main 分支
+          git push origin main

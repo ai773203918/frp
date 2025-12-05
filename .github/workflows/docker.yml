@@ -1,0 +1,117 @@
+# 工作流名称
+name: 在有新 Release 时构建并推送 Docker 镜像
+
+# 触发条件
+on:
+  # 每小时运行一次检查
+  schedule:
+    - cron: '0 * * * *'
+  # 允许手动触发
+  workflow_dispatch:
+
+# 任务定义
+jobs:
+  # 任务 1: 检查并决定是否构建
+  check-and-build:
+    runs-on: ubuntu-latest
+    # 条件判断：确保只在原始仓库所有者（ai773203918）的仓库中运行
+    if: ${{ github.repository_owner == 'ai773203918' }}
+
+    # 定义输出变量，用于传递给下一个任务
+    outputs:
+      # 将获取到的版本号传递给下一个 job
+      latest_tag: ${{ steps.get_release.outputs.tag }}
+
+    # 任务步骤
+    steps:
+      # 步骤 1: 获取最新的 Release 版本号
+      - name: 获取最新的 Release Tag
+        id: get_release
+        run: |
+          echo "正在从 fatedier/frp 获取最新 release..."
+          # 使用 GitHub API 获取最新的 release tag
+          LATEST_TAG=$(curl -sL https://api.github.com/repos/fatedier/frp/releases/latest | jq -r ".tag_name")
+          echo "最新的 release tag 是: $LATEST_TAG"
+          # 将 tag 写入到 GITHUB_OUTPUT
+          echo "tag=$LATEST_TAG" >> $GITHUB_OUTPUT
+
+      # 步骤 2: 检查 Docker 镜像是否已存在
+      - name: 检查 Docker 镜像是否存在
+        id: check_image
+        run: |
+          # 从上一个步骤获取 tag
+          TAG="${{ steps.get_release.outputs.tag }}"
+          # 使用 skopeo 工具进行检查，需要先安装
+          sudo apt-get update
+          sudo apt-get install -y skopeo
+          
+          # 【修改】现在只需要检查一个名为 frp 的镜像
+          if skopeo inspect docker://docker.io/${{ secrets.DOCKERHUB_USERNAME }}/frp:$TAG > /dev/null 2>&1; then
+            echo "Tag 为 $TAG 的 frp 镜像已存在。跳过构建。"
+            # 设置输出变量，告知后续任务无需构建
+            echo "should_build=false" >> $GITHUB_OUTPUT
+          else
+            echo "Tag 为 $TAG 的 frp 镜像不存在。将触发构建。"
+            # 设置输出变量，告知后续任务需要构建
+            echo "should_build=true" >> $GITHUB_OUTPUT
+          fi
+
+  # 任务 2: 构建并推送镜像
+  build-and-push:
+    # 依赖于 check-and-build 任务的完成
+    needs: check-and-build
+    # 只有当 should_build 为 true 时才运行
+    if: needs.check-and-build.outputs.should_build == 'true'
+    runs-on: ubuntu-latest # 运行环境
+
+    # 任务步骤
+    steps:
+      # 步骤 1: 检出上游仓库的源代码
+      - name: 检出 fatedier/frp 源代码
+        uses: actions/checkout@v4
+        with:
+          # 指定要检出的仓库是上游仓库
+          repository: fatedier/frp
+          # 检出特定的 release tag（由上一个 job 传递而来）
+          ref: ${{ needs.check-and-build.outputs.latest_tag }}
+
+      # 步骤 2: 设置 Docker Buildx
+      - name: 设置 Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # 步骤 3: 登录到 Docker Hub
+      - name: 登录到 Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }} # 从 Secrets 中读取用户名
+          password: ${{ secrets.DOCKERHUB_TOKEN }}   # 从 Secrets 中读取访问令牌
+
+      # 步骤 4: 提取元数据（标签和标签）
+      - name: 提取元数据
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          # 【修改】镜像名称现在是统一的 frp
+          images: ${{ secrets.DOCKERHUB_USERNAME }}/frp
+          # 定义镜像的标签
+          tags: |
+            # 标签为最新的 release tag (例如 v0.52.3)
+            type=raw,value=${{ needs.check-and-build.outputs.latest_tag }}
+            # 添加一个 'latest' 标签
+            type=raw,value=latest
+
+      # 步骤 5: 构建并推送 Docker 镜像
+      - name: 构建并推送 Docker 镜像
+        uses: docker/build-push-action@v5
+        with:
+          context: . # 构建上下文是当前目录
+          file: ./Dockerfile # 指定 Dockerfile 路径
+          push: true # 推送镜像到仓库
+          tags: ${{ steps.meta.outputs.tags }} # 使用上一步生成的标签
+          labels: ${{ steps.meta.outputs.labels }} # 使用上一步生成的标签
+          # 【修改】不再需要 build-args，因为 Dockerfile 总是构建所有组件
+          # build-args: |
+          #   TARGET=${{ matrix.component }}
+          # 启用构建缓存，加速后续构建
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
